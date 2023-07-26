@@ -1,10 +1,10 @@
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader
-import torchvision
-from torchvision import transforms, models, datasets
+from torchvision import transforms, datasets
 from PIL import Image
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 class PoseDataset(Dataset):
@@ -42,31 +42,49 @@ class PoseDataset(Dataset):
         return image_paths, poses
 
 
-def get_dataloader(train=True):  # dataset_path, batch_size,
-    if train:
-        transform = transforms.Compose([
-            transforms.Resize(256),  # 300, 299
-            transforms.RandomCrop(224),
+def get_dataloader(dataset_path, mode, model='resnet', batch_size=32):
+
+    if model == 'googlenet':
+        resize = 300
+        crop = 299
+    else:
+        resize = 256
+        crop = 224
+
+    if mode == 'train':
+        tfs = transforms.Compose([
+            transforms.Resize(resize),
+            transforms.RandomCrop(crop),
             transforms.ColorJitter(0.5, 0.5, 0.5, 0.2),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
-        train_data = PoseDataset("../datasets/KingsCollege", train=True, tfs=transform)
-        dataloader = DataLoader(dataset=train_data, batch_size=32, shuffle=True, num_workers=4)
-    else:  # test
-        transform = transforms.Compose([
-            transforms.Resize(256),  # 300, 299
-            transforms.CenterCrop(224),
+        train_data = PoseDataset(dataset_path, train=True, tfs=tfs)
+        dataloader = DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True, num_workers=4)
+    elif mode == 'val':
+        tfs = transforms.Compose([
+            transforms.Resize(resize),
+            transforms.CenterCrop(crop),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
-        test_data = PoseDataset("../datasets/KingsCollege", train=False, tfs=transform)
-        dataloader = DataLoader(dataset=test_data, batch_size=32, shuffle=False, num_workers=4)
+        test_data = PoseDataset(dataset_path, train=False, tfs=tfs)
+        dataloader = DataLoader(dataset=test_data, batch_size=batch_size, shuffle=False, num_workers=4)
+    else:  # mode -> test
+        # same data as val for now but batch size 1
+        tfs = transforms.Compose([
+            transforms.Resize(resize),
+            transforms.CenterCrop(crop),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        test_data = PoseDataset(dataset_path, train=False, tfs=tfs)
+        dataloader = DataLoader(dataset=test_data, batch_size=1, shuffle=False, num_workers=4)
 
     return dataloader
 
 
-# test it (this doesn't run when imported; only when run directly)
+# test the code (this doesn't run when imported; only when run directly)
 if __name__ == '__main__':
     transform = transforms.Compose([
         transforms.Resize(256),
@@ -75,20 +93,28 @@ if __name__ == '__main__':
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
-    d1 = PoseDataset("../datasets/KingsCollege", tfs=transform)
+    d1 = PoseDataset("./datasets/KingsCollege", tfs=transform)
     x, y = d1.__getitem__(25)
     print(x.shape)
     print(y)
+    print()
 
-    train_loader = get_dataloader(train=True)
-    print(f"Length of train_dataloader: {len(train_loader)} batches of {32}...")
+    train_loader = get_dataloader(dataset_path='./datasets/KingsCollege', mode='train')
+    val_loader = get_dataloader(dataset_path='./datasets/KingsCollege', mode='val')
+    print(f"Loading data from: {'./datasets/KingsCollege'}")
+    print(f"No. of Training samples: {len(train_loader)*32}; {len(train_loader)} batches of {32}")
+    print(f"No. of Validation samples: {len(val_loader)*32}; {len(val_loader)} batches of {32}")
+    print()
 
     train_features_batch, train_labels_batch = next(iter(train_loader))
     print(train_features_batch.shape, train_labels_batch.shape)
-    img, pose = train_features_batch[0], train_labels_batch[0]
 
-    plt.imshow(img.squeeze())
-    # img.permute(1, 2, 0)
-    plt.axis(False)
+    img, pose = train_features_batch[0], train_labels_batch[0]
     print(f"Image size: {img.shape}")
     print(f"Label: {pose}, label size: {pose.shape}")
+
+    npimg = img.numpy()
+    plt.imshow(np.transpose(npimg, (1, 2, 0)))
+    plt.show()
+
+

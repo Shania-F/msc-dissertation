@@ -6,9 +6,9 @@ import torch.nn.functional as F
 # A 'model' with 2 learnable weights, learn_beta determines if they should be learnable
 # they are made learnable with nn.Parameter()
 # sx and sq ARE beta
-class PoseLoss(nn.Module):
+class GeoPoseLoss(nn.Module):
     def __init__(self, sx=0.0, sq=0.0, learn_beta=False):
-        super(PoseLoss, self).__init__()
+        super(GeoPoseLoss, self).__init__()
         self.learn_beta = learn_beta
 
         if not self.learn_beta:
@@ -21,7 +21,7 @@ class PoseLoss(nn.Module):
         self.sx = nn.Parameter(torch.Tensor([sx]), requires_grad=self.learn_beta)
         self.sq = nn.Parameter(torch.Tensor([sq]), requires_grad=self.learn_beta)
 
-        self.loss_print = None
+        self.loss_print = []  # can be used to store all losses
 
     def forward(self, pred_x, pred_q, target_x, target_q):
         pred_q = F.normalize(pred_q, p=2, dim=1)  # normalise to unit quaternion
@@ -43,7 +43,7 @@ class PoseLoss(nn.Module):
 
 
 if __name__ == '__main__':
-    loss_fn = PoseLoss()
+    loss_fn = GeoPoseLoss()
 
     # Create synthetic data (also works for batches)
     pred_x = torch.randn(1, 3)  # (32, 3) etc.
