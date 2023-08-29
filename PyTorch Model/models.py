@@ -6,6 +6,48 @@ from torchvision import models
 from torchsummary import summary
 
 
+# https://github.com/NVlabs/geomapnet/blob/master/models/posenet.py
+class PoseNet(nn.Module):
+    def __init__(self, droprate=0.5, pretrained=True):
+        super(PoseNet, self).__init__()
+        self.droprate = droprate
+
+        # replace the last FC layer in feature extractor
+        self.feature_extractor = models.resnet34(weights="IMAGENET1K_V1")
+        self.feature_extractor.avgpool = nn.AdaptiveAvgPool2d(1)
+        in_dim = self.feature_extractor.fc.in_features
+        self.feature_extractor.fc = nn.Linear(in_dim, 2048)
+
+        self.fc_xyz = nn.Linear(2048, 3)
+        self.fc_wpqr = nn.Linear(2048, 4)
+
+        # initialize
+        if pretrained:
+            init_modules = [self.feature_extractor.fc, self.fc_xyz, self.fc_wpqr]
+        else:
+            init_modules = self.modules()
+
+        for m in init_modules:
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight.data)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias.data, 0)
+
+    def forward(self, x):
+        x = self.feature_extractor(x)
+        # 1 x 2048
+        x = F.relu(x)
+        if self.droprate > 0:
+            x = F.dropout(x, p=self.droprate)
+
+        xyz = self.fc_xyz(x)
+        wpqr = self.fc_wpqr(x)
+        return xyz, wpqr
+    # seems to be no random crop, no colour jitter;
+    # log of quaternion
+    # 300 epochs
+
+
 class ResNet(nn.Module):
     def __init__(self, fixed_weight=False, dropout_rate=0.0):
         super(ResNet, self).__init__()
@@ -38,7 +80,7 @@ class ResNet(nn.Module):
     def forward(self, x):
         x = self.base_model(x)
         # print("AFTER RESNET", x.shape)
-        x = x.view(x.size(0), -1)  # flatten
+        x = x.view(x.size(0), -1)  # flatten TODO global average pool
         # print("AFTER VIEW", x.shape)
         x = self.fc_last(x)
         x = F.relu(x)
@@ -111,127 +153,12 @@ class GoogleNet(nn.Module):
         return pos, ori
 
 
-class NetVLAD(nn.Module):
-    """NetVLAD layer implementation"""
-
-    def __init__(self, num_clusters=64, dim=128, alpha=100.0,
-                 normalize_input=True):
-        """
-        Args:
-            num_clusters : int
-                The number of clusters
-            dim : int
-                Dimension of descriptors
-            alpha : float
-                Parameter of initialization. Larger value is harder assignment.
-            normalize_input : bool
-                If true, descriptor-wise L2 normalization is applied to input.
-        """
-        super(NetVLAD, self).__init__()
-        self.num_clusters = num_clusters
-        self.dim = dim
-        self.alpha = alpha
-        self.normalize_input = normalize_input
-        self.conv = nn.Conv2d(dim, num_clusters, kernel_size=(1, 1), bias=True)
-        self.centroids = nn.Parameter(torch.rand(num_clusters, dim))  # cluster centres
-        self._init_params()
-
-    def _init_params(self):
-        # manually initialising rather than PyTorch assigning random values to weights and 0s to bias
-        self.conv.weight = nn.Parameter(
-            (2.0 * self.alpha * self.centroids).unsqueeze(-1).unsqueeze(-1)
-        )
-        self.conv.bias = nn.Parameter(
-            - self.alpha * self.centroids.norm(dim=1)
-        )
-
-    def forward(self, x):
-        N, C = x.shape[:2]  # N->batch size, C->channels
-
-        if self.normalize_input:
-            x = F.normalize(x, p=2, dim=1)  # across descriptor dim
-
-        # soft-assignment
-        soft_assign = self.conv(x).view(N, self.num_clusters, -1)
-        soft_assign = F.softmax(soft_assign, dim=1)
-
-        x_flatten = x.view(N, C, -1)
-
-        # calculate residuals to each clusters
-        residual = x_flatten.expand(self.num_clusters, -1, -1, -1).permute(1, 0, 2, 3) - \
-                   self.centroids.expand(x_flatten.size(-1), -1, -1).permute(1, 2, 0).unsqueeze(0)
-        residual *= soft_assign.unsqueeze(2)
-        vlad = residual.sum(dim=-1)
-
-        vlad = F.normalize(vlad, p=2, dim=2)  # intra-normalization
-        vlad = vlad.view(x.size(0), -1)  # flatten
-        vlad = F.normalize(vlad, p=2, dim=1)  # L2 normalize
-
-        return vlad
-
-
-class ResNetVLAD(nn.Module):
-    def __init__(self, fixed_weight=False):
-        super(ResNetVLAD, self).__init__()
-
-        # Discard layers at the end of base network
-        encoder = models.resnet34(weights="IMAGENET1K_V1")
-        self.base_model = nn.Sequential(
-            encoder.conv1,
-            encoder.bn1,
-            encoder.relu,
-            encoder.maxpool,
-            encoder.layer1,
-            encoder.layer2,
-            encoder.layer3,
-            encoder.layer4
-        )
-
-        if fixed_weight:
-            for param in self.base_model.parameters():
-                param.requires_grad = False
-
-        dim = list(self.base_model.parameters())[-1].shape[0]  # last channels (512)
-        self.net_vlad = NetVLAD(num_clusters=32, dim=dim, alpha=1.0)
-
-        self.fc_last = nn.Linear(16384, 2048, bias=True)
-        self.fc_position = nn.Linear(2048, 3, bias=True)
-        self.fc_rotation = nn.Linear(2048, 4, bias=True)
-
-        init_modules = [self.fc_last, self.fc_position, self.fc_rotation]
-
-        for module in init_modules:
-            if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
-                nn.init.kaiming_normal_(module.weight)
-                if module.bias is not None:
-                    nn.init.constant_(module.bias, 0)
-
-    def forward(self, x):
-        # print("FORWARD PASS STARTING", x.shape)
-        x = self.base_model(x)
-        # print("AFTER RESNET", x.shape)
-        embedded_x = self.net_vlad(x)
-        # print("AFTER NETVLAD", embedded_x.shape)
-
-        x = self.fc_last(embedded_x)
-        x = F.relu(x)
-
-        # from that space of 2048, 3 for pos and 4 for ori are sampled
-        position = self.fc_position(x)
-        rotation = self.fc_rotation(x)
-
-        return position, rotation
-
-
 if __name__ == '__main__':
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # model = GoogleNet()
-    # model.to("cuda:0")
+    # model.to(device)
     # summary(model, (3, 299, 299))
 
-    # model2 = ResNet()
-    # model2.to("cuda:0")
-    # summary(model2, (3, 224, 224))
-
-    model3 = ResNetVLAD()
-    model3.to("cuda:0")
-    summary(model3, (3, 224, 224))
+    model2 = PoseNet()
+    model2.to(device)
+    summary(model2, (3, 224, 224))

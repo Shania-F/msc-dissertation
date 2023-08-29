@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 
-def quat_to_euler(q, is_degree=False):
+def quat_to_euler(q, is_degree=True):
     w, x, y, z = q[0], q[1], q[2], q[3]
 
     t0 = +2.0 * (w * x + y * z)
@@ -26,21 +26,26 @@ def quat_to_euler(q, is_degree=False):
     return np.array([roll, pitch, yaw])
 
 
-def array_dist(pred, target):
-    return np.linalg.norm(pred - target, 2)
-
-
 def position_dist(pred, target):
-    return np.linalg.norm(pred-target, 2)
+    return np.linalg.norm(pred-target, ord=2)
 
 
-def rotation_dist(pred, target):
-    pred = quat_to_euler(pred)
-    target = quat_to_euler(target)
+def rotation_dist(pred, target):  # angle-axis
 
-    return np.linalg.norm(pred-target, 2)
+    # Calculate quaternion difference
+    # scalar dot product by element-wise multiplying each element, then adding
+    quaternion_difference = np.dot(target, pred)
 
-# only for bayesian
+    # Calculate rotation error in radians
+    # arc cosine (inverse cosine) is often used in trigonometric calculations, and in this context,
+    # it is used to compute the rotation angle based on the quaternion difference.
+    alpha = 2 * np.arccos(np.abs(quaternion_difference))
+
+    # Convert radians to degrees
+    return alpha * (180.0 / np.pi)
+
+
+# only for bayesian posenet
 def fit_gaussian(pose_quat):
     # pose_quat = pose_quat.detach().cpu().numpy()
 
