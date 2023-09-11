@@ -11,7 +11,7 @@ import random
 def read_data():
         image_paths = []
         poses = []
-        PATH = '/home/shania/catkin_ws/src/android/scripts/KingsCollege'
+        PATH = '/home/shania/catkin_ws/src/android/scripts/datasets/KingsCollege'
         file_name = 'dataset_test.txt'
         with open("/".join([PATH, file_name])) as f:
             lines = f.readlines()
