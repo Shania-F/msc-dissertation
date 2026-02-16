@@ -4,7 +4,7 @@ code and files supporting my MSc dissertation at University of Surrey: -
 a mobile application that allows users to summon a robot to their location by guessing it through a pose regression CNN
 
 ## Application Preview
-![App Screenshot](images_app_ss)
+<img src="images_app_ss.jpg" width="80">
 
 ## System Architecture
-![System Architecture](images_architecture.jpg)
+<img src="images_architecture.jpg" width="160">
